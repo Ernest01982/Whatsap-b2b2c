@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { FileText, Plus, Eye, Loader as Loader2, CircleAlert as AlertCircle } from 'lucide-react';
+import { FileText, Plus, Eye, Loader2, CircleAlert as AlertCircle, Download, Mail } from 'lucide-react';
 
 interface Invoice {
   id: string;
@@ -17,6 +17,7 @@ interface Invoice {
   created_at: string;
   clients: {
     name: string;
+    email_address: string | null;
   };
 }
 
@@ -29,10 +30,11 @@ const statusStyles: Record<string, string> = {
 };
 
 export default function InvoicesPage() {
-  const { merchant } = useAuth();
+  const { merchant, session } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchInvoices = async () => {
     if (!merchant) return;
@@ -49,7 +51,8 @@ export default function InvoicesPage() {
         balance_due,
         created_at,
         clients (
-          name
+          name,
+          email_address
         )
       `)
       .eq('merchant_id', merchant.id)
@@ -82,6 +85,80 @@ export default function InvoicesPage() {
       month: 'short',
       year: 'numeric',
     });
+  };
+
+  const handleDownloadPDF = async (invoiceId: string) => {
+    if (!session?.access_token) return;
+
+    setActionLoading(`pdf-${invoiceId}`);
+    setError('');
+
+    try {
+      const response = await fetch('/api/invoices/pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate PDF');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Invoice-${invoiceId.substring(0, 8).toUpperCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('PDF download error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to download PDF');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleEmailInvoice = async (invoiceId: string, hasEmail: boolean) => {
+    if (!session?.access_token) return;
+
+    if (!hasEmail) {
+      setError('This client does not have an email address. Please update their contact information first.');
+      return;
+    }
+
+    setActionLoading(`email-${invoiceId}`);
+    setError('');
+
+    try {
+      const response = await fetch('/api/invoices/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send email');
+      }
+
+      alert(`Invoice sent successfully to ${data.sent_to}`);
+    } catch (err) {
+      console.error('Email send error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send email');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   return (
@@ -177,14 +254,42 @@ export default function InvoicesPage() {
                         {invoice.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <Link
-                        href={`/dashboard/invoices/${invoice.id}`}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
-                      >
-                        <Eye className="w-4 h-4" />
-                        View
-                      </Link>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          href={`/dashboard/invoices/${invoice.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span className="hidden sm:inline">View</span>
+                        </Link>
+                        <button
+                          onClick={() => handleDownloadPDF(invoice.id)}
+                          disabled={actionLoading === `pdf-${invoice.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="Download PDF"
+                        >
+                          {actionLoading === `pdf-${invoice.id}` ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          <span className="hidden sm:inline">PDF</span>
+                        </button>
+                        <button
+                          onClick={() => handleEmailInvoice(invoice.id, !!invoice.clients?.email_address)}
+                          disabled={actionLoading === `email-${invoice.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
+                          title={invoice.clients?.email_address ? "Email to Client" : "No email address"}
+                        >
+                          {actionLoading === `email-${invoice.id}` ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Mail className="w-4 h-4" />
+                          )}
+                          <span className="hidden sm:inline">Email</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

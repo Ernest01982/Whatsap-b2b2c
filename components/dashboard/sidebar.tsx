@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Chrome as Home, Users, Package, FileText, CalendarDays, Settings, X } from 'lucide-react';
+import { Chrome as Home, Users, Package, FileText, CalendarDays, Settings, X, BarChart3 } from 'lucide-react';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -16,6 +16,7 @@ const navItems = [
   { href: '/dashboard/services', label: 'Services Catalog', icon: Package },
   { href: '/dashboard/invoices', label: 'Quotes & Invoices', icon: FileText },
   { href: '/dashboard/events', label: 'Events & Tickets', icon: CalendarDays },
+  { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
