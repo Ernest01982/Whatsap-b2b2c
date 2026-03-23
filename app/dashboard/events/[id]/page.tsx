@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { CalendarDays, ArrowLeft, Loader as Loader2, CircleAlert as AlertCircle, Users, Ticket, Phone, DollarSign, Plus, Trash2, X, Check } from 'lucide-react';
+import { CalendarDays, ArrowLeft, Loader as Loader2, CircleAlert as AlertCircle, Users, Ticket, Phone, DollarSign, Plus, Trash2, X, Check, Download, QrCode } from 'lucide-react';
 
 interface Event {
   id: string;
@@ -48,6 +48,7 @@ export default function EventDetailPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [exportSuccess, setExportSuccess] = useState('');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -147,6 +148,31 @@ export default function EventDetailPage() {
     }
   };
 
+  const handleExportForOffline = () => {
+    if (!event) return;
+
+    const offlineData = {
+      event: {
+        id: event.id,
+        name: event.name,
+        event_date: event.event_date,
+        ticket_price: event.ticket_price,
+      },
+      tickets: tickets.map((t) => ({
+        id: t.id,
+        status: t.status,
+        client_name: t.clients?.name || 'Unknown',
+        client_phone: t.clients?.phone_number || '',
+      })),
+      exported_at: new Date().toISOString(),
+    };
+
+    localStorage.setItem(`offline_event_${event.id}`, JSON.stringify(offlineData));
+    setExportSuccess(`Database exported! ${tickets.length} tickets saved for offline scanning.`);
+
+    setTimeout(() => setExportSuccess(''), 5000);
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-ZA', {
       style: 'currency',
@@ -203,7 +229,7 @@ export default function EventDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
           <Link
             href="/dashboard/events"
@@ -223,20 +249,43 @@ export default function EventDetailPage() {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          disabled={remainingCapacity <= 0}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Plus className="w-4 h-4" />
-          Manually Add Attendee
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportForOffline}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium rounded-lg transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download for Offline
+          </button>
+          <Link
+            href={`/offline-scanner/${event.id}`}
+            className="flex items-center gap-2 px-4 py-2 border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium rounded-lg transition-colors"
+          >
+            <QrCode className="w-4 h-4" />
+            Open Scanner
+          </Link>
+          <button
+            onClick={() => setShowAddModal(true)}
+            disabled={remainingCapacity <= 0}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-4 h-4" />
+            Add Attendee
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {exportSuccess && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-3">
+          <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-emerald-700">{exportSuccess}</p>
         </div>
       )}
 
