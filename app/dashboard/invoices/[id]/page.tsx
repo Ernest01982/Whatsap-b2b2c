@@ -191,7 +191,12 @@ export default function InvoiceDetailPage() {
   const openWhatsApp = () => {
     if (!invoice?.clients?.phone_number || !paymentUrl) return;
 
-    const phone = invoice.clients.phone_number.replace(/\D/g, '');
+    let phone = invoice.clients.phone_number.replace(/\D/g, '');
+    if (phone.startsWith('0')) {
+      phone = '27' + phone.substring(1);
+    } else if (!phone.startsWith('27') && phone.length === 9) {
+      phone = '27' + phone;
+    }
     const message = encodeURIComponent(getWhatsAppMessage());
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   };
