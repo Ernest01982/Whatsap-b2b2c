@@ -29,25 +29,22 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    
-    // 1. Fetch environment variables directly inside the request
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    if (!supabaseUrl || !supabaseServiceKey) {
+    if (!supabaseUrl || !supabaseKey) {
       console.error('[Invoice Send] Missing Supabase environment variables');
       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
-    // 2. Create a FRESH client for every request to avoid Next.js caching crashes
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+    // CREATE A FRESH CLIENT INSIDE THE REQUEST
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: {
+        headers: { Authorization: `Bearer ${token}` },
       },
     });
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {
       console.error('[Invoice Send] Invalid token:', authError);
@@ -62,9 +59,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('[Invoice Send] Authenticated user:', user.id);
-    console.log('[Invoice Send] Processing invoice:', invoice_id, 'Payment type:', payment_type);
-
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
       .select('id, business_name')
@@ -72,33 +66,19 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (merchantError || !merchant) {
-      console.error('[Invoice Send] Merchant not found:', merchantError);
       return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
     }
 
-    console.log('[Invoice Send] Merchant found:', merchant.business_name);
-
     const { data: invoice, error: invoiceError } = await supabase
       .from('quotes_invoices')
-      .select(`
-        id,
-        invoice_number,
-        total_amount,
-        deposit_amount,
-        balance_due,
-        status,
-        merchant_id
-      `)
+      .select('id, invoice_number, total_amount, deposit_amount, balance_due, status, merchant_id')
       .eq('id', invoice_id)
       .eq('merchant_id', merchant.id)
       .maybeSingle();
 
     if (invoiceError || !invoice) {
-      console.error('[Invoice Send] Invoice not found:', invoiceError);
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
-
-    console.log('[Invoice Send] Invoice found:', invoice.id, 'Status:', invoice.status);
 
     const isDeposit = payment_type === 'deposit';
     const paymentAmount = isDeposit ? invoice.deposit_amount : invoice.balance_due;
@@ -110,19 +90,8 @@ export async function POST(request: NextRequest) {
     const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || '';
     const paymentUrl = `${appBaseUrl}/pay/${invoice.id}?type=${payment_type}`;
 
-    console.log('[Invoice Send] Checkout URL generated:', paymentUrl);
-
     const newStatus = isDeposit ? 'Pending Deposit' : 'Pending Final';
-    const { error: updateError } = await supabase
-      .from('quotes_invoices')
-      .update({ status: newStatus })
-      .eq('id', invoice.id);
-
-    if (updateError) {
-      console.error('[Invoice Send] Error updating invoice status:', updateError);
-    } else {
-      console.log('[Invoice Send] Invoice status updated to:', newStatus);
-    }
+    await supabase.from('quotes_invoices').update({ status: newStatus }).eq('id', invoice.id);
 
     return NextResponse.json({
       success: true,
