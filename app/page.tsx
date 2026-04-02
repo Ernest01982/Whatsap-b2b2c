@@ -1,68 +1,181 @@
-'use client';
-
-import { Database, CircleCheck as CheckCircle, FileText, Ticket } from 'lucide-react';
+import Link from 'next/link';
+import { FileText, Ticket, CreditCard, Users, Shield, Smartphone, ArrowRight, CircleCheck as CheckCircle } from 'lucide-react';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center p-8">
-      <div className="max-w-2xl w-full">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
-                <Database className="w-5 h-5 text-white" />
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                <CreditCard className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-semibold text-white">System Foundation</h1>
-                <p className="text-slate-400 text-sm">Multi-Tenant B2B2C Platform</p>
-              </div>
+              <span className="text-lg font-semibold text-slate-900">MerchantHub</span>
             </div>
-          </div>
-
-          <div className="p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <CheckCircle className="w-6 h-6 text-emerald-500" />
-              <span className="text-lg font-medium text-slate-800">Initialized: Ready for UI</span>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg">
-                <FileText className="w-5 h-5 text-blue-500 mt-0.5" />
-                <div>
-                  <h3 className="font-medium text-slate-800">Invoicing Module</h3>
-                  <p className="text-sm text-slate-600">Merchants, clients, services, quotes, and invoice management</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg">
-                <Ticket className="w-5 h-5 text-amber-500 mt-0.5" />
-                <div>
-                  <h3 className="font-medium text-slate-800">Ticketing Module</h3>
-                  <p className="text-sm text-slate-600">Events and tickets with QR verification support</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-slate-200">
-              <h4 className="text-sm font-medium text-slate-700 mb-3">Database Tables Created</h4>
-              <div className="flex flex-wrap gap-2">
-                {['merchants', 'clients', 'services', 'quotes_invoices', 'invoice_items', 'events', 'tickets'].map((table) => (
-                  <span
-                    key={table}
-                    className="px-3 py-1 bg-slate-100 text-slate-700 text-sm rounded-full font-mono"
-                  >
-                    {table}
-                  </span>
-                ))}
-              </div>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/login"
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Sign In
+              </Link>
+              <Link
+                href="/signup"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Get Started
+              </Link>
             </div>
           </div>
         </div>
+      </header>
 
-        <p className="text-center text-slate-500 text-sm mt-6">
-          Supabase connected with Row Level Security enabled
-        </p>
-      </div>
+      <main>
+        <section className="py-20 lg:py-28">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center max-w-3xl mx-auto">
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-slate-900 leading-tight">
+                Manage Your Business
+                <span className="block text-emerald-600">All in One Place</span>
+              </h1>
+              <p className="mt-6 text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto">
+                Streamline your invoicing, manage clients, and sell event tickets with instant EFT payments. Built for South African businesses.
+              </p>
+              <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+                <Link
+                  href="/signup"
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors text-lg"
+                >
+                  Start Free
+                  <ArrowRight className="w-5 h-5" />
+                </Link>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-white hover:bg-slate-50 text-slate-900 font-semibold rounded-xl border border-slate-200 transition-colors text-lg"
+                >
+                  Sign In to Dashboard
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="py-16 bg-white border-y border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold text-slate-900">Everything You Need</h2>
+              <p className="mt-4 text-lg text-slate-600">Powerful tools designed for South African merchants</p>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4">
+                  <FileText className="w-6 h-6 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Invoicing</h3>
+                <p className="text-slate-600">
+                  Create professional quotes and invoices. Send payment requests via WhatsApp with one click.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-4">
+                  <CreditCard className="w-6 h-6 text-emerald-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Instant EFT Payments</h3>
+                <p className="text-slate-600">
+                  Accept payments instantly via Ozow. No card machines, no waiting for funds.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-4">
+                  <Ticket className="w-6 h-6 text-amber-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Event Ticketing</h3>
+                <p className="text-slate-600">
+                  Sell tickets for events with QR code verification. Works offline at the gate.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center mb-4">
+                  <Users className="w-6 h-6 text-teal-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Client Management</h3>
+                <p className="text-slate-600">
+                  Keep track of all your customers in one place. Segment by region for targeted communication.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-slate-200 rounded-xl flex items-center justify-center mb-4">
+                  <Shield className="w-6 h-6 text-slate-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Secure & Private</h3>
+                <p className="text-slate-600">
+                  Your data is isolated and protected. Each business has their own secure space.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                <div className="w-12 h-12 bg-rose-100 rounded-xl flex items-center justify-center mb-4">
+                  <Smartphone className="w-6 h-6 text-rose-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Works Offline</h3>
+                <p className="text-slate-600">
+                  Install as an app on your phone. Scan tickets even without internet connection.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="py-16">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-8 md:p-12 text-center">
+              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                Ready to streamline your business?
+              </h2>
+              <p className="text-slate-300 text-lg mb-8 max-w-2xl mx-auto">
+                Join merchants across South Africa who are using MerchantHub to manage their invoices, payments, and events.
+              </p>
+              <Link
+                href="/signup"
+                className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-xl transition-colors text-lg"
+              >
+                Create Your Free Account
+                <ArrowRight className="w-5 h-5" />
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="bg-white border-t border-slate-200 py-12">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-emerald-500 rounded flex items-center justify-center">
+                <CreditCard className="w-3 h-3 text-white" />
+              </div>
+              <span className="font-semibold text-slate-900">MerchantHub</span>
+            </div>
+            <div className="flex items-center gap-6 text-sm text-slate-600">
+              <Link href="/terms" className="hover:text-slate-900 transition-colors">
+                Terms of Service
+              </Link>
+              <Link href="/privacy" className="hover:text-slate-900 transition-colors">
+                Privacy Policy
+              </Link>
+            </div>
+            <p className="text-sm text-slate-500">
+              Built for South African businesses
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

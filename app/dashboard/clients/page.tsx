@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { supabase } from '@/lib/supabase';
 import { Users, Plus, Trash2, Loader as Loader2, CircleAlert as AlertCircle, CircleCheck as CheckCircle, Phone, Mail, MapPin } from 'lucide-react';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 interface Client {
   id: string;
@@ -41,6 +42,8 @@ export default function ClientsPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [emailAddress, setEmailAddress] = useState('');
   const [region, setRegion] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
 
   const fetchClients = async () => {
     if (!merchant) return;
@@ -121,20 +124,27 @@ export default function ClientsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this client?')) return;
+  const openDeleteDialog = (client: Client) => {
+    setClientToDelete(client);
+    setDeleteDialogOpen(true);
+  };
 
-    setDeleting(id);
+  const handleDelete = async () => {
+    if (!clientToDelete) return;
+
+    setDeleting(clientToDelete.id);
     setError('');
 
     try {
       const { error: deleteError } = await supabase
         .from('clients')
         .delete()
-        .eq('id', id);
+        .eq('id', clientToDelete.id);
 
       if (deleteError) throw deleteError;
 
+      setDeleteDialogOpen(false);
+      setClientToDelete(null);
       await fetchClients();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete client');
@@ -372,7 +382,7 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button
-                        onClick={() => handleDelete(client.id)}
+                        onClick={() => openDeleteDialog(client)}
                         disabled={deleting === client.id}
                         className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                       >
@@ -391,6 +401,16 @@ export default function ClientsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete Client"
+        description={`Are you sure you want to delete "${clientToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        onConfirm={handleDelete}
+        loading={deleting !== null}
+      />
     </div>
   );
 }

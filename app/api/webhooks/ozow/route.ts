@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -120,6 +121,16 @@ async function sendWhatsAppReceipt(
 
 export async function POST(request: NextRequest) {
   console.log('[Ozow Webhook] Received webhook request');
+
+  const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+  const rateLimitResult = checkRateLimit(`webhook-ozow:${ip}`, { maxRequests: 100, windowMs: 60000 });
+  if (!rateLimitResult.allowed) {
+    console.warn('[Ozow Webhook] Rate limit exceeded for IP:', ip);
+    return NextResponse.json(
+      { error: 'Too many requests' },
+      { status: 429, headers: getRateLimitHeaders(rateLimitResult.remaining, rateLimitResult.resetTime) }
+    );
+  }
 
   try {
     let payload: OzowWebhookPayload;

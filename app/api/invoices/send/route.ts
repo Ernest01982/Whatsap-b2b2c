@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -132,6 +133,14 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       console.error('[Invoice Send] Invalid token:', authError);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rateLimitResult = checkRateLimit(`invoice-send:${user.id}`, { maxRequests: 10, windowMs: 60000 });
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: getRateLimitHeaders(rateLimitResult.remaining, rateLimitResult.resetTime) }
+      );
     }
 
     console.log('[Invoice Send] Authenticated user:', user.id);

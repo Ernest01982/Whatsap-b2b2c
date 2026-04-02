@@ -26,19 +26,15 @@ export const metadata: Metadata = {
     telephone: false,
   },
   openGraph: {
-    images: [
-      {
-        url: 'https://bolt.new/static/og_default.png',
-      },
-    ],
+    title: 'MerchantHub - Business Management',
+    description: 'Manage your clients, invoices, events, and tickets with MerchantHub',
+    type: 'website',
+    siteName: 'MerchantHub',
   },
   twitter: {
-    card: 'summary_large_image',
-    images: [
-      {
-        url: 'https://bolt.new/static/og_default.png',
-      },
-    ],
+    card: 'summary',
+    title: 'MerchantHub - Business Management',
+    description: 'Manage your clients, invoices, events, and tickets with MerchantHub',
   },
 };
 
@@ -50,7 +46,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="mobile-web-app-capable" content="yes" />
