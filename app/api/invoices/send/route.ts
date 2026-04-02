@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
 
-// Tell Next.js NEVER to cache this API route
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
@@ -37,14 +36,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
-    // CREATE A FRESH CLIENT INSIDE THE REQUEST
+    // THE FIX: Bulletproof Supabase Client for Next.js App Router
     const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
       global: {
         headers: { Authorization: `Bearer ${token}` },
+        // Bypasses Next.js fetch caching bugs
+        fetch: (url, options) => fetch(url, options),
       },
     });
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    // Explicitly pass the token to getUser
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
       console.error('[Invoice Send] Invalid token:', authError);
