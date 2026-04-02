@@ -2,14 +2,35 @@
 
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { CircleCheck as CheckCircle, ArrowRight, Receipt, Chrome as Home } from 'lucide-react';
-import { Suspense } from 'react';
+import { CircleCheck as CheckCircle, Chrome as Home } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 function PaymentSuccessContent() {
   const searchParams = useSearchParams();
-  const transactionId = searchParams.get('TransactionId');
-  const amount = searchParams.get('Amount');
-  const reference = searchParams.get('TransactionReference');
+  const invoiceId = searchParams.get('invoice_id');
+  const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
+  const [businessName, setBusinessName] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchInvoice() {
+      if (!invoiceId) return;
+
+      const { data } = await supabase
+        .from('quotes_invoices')
+        .select('id, merchants(business_name)')
+        .eq('id', invoiceId)
+        .maybeSingle();
+
+      if (data) {
+        setInvoiceNumber(data.id.substring(0, 8).toUpperCase());
+        const merchants = data.merchants as unknown as { business_name: string } | null;
+        setBusinessName(merchants?.business_name || null);
+      }
+    }
+
+    fetchInvoice();
+  }, [invoiceId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white flex items-center justify-center p-4">
@@ -27,24 +48,18 @@ function PaymentSuccessContent() {
             Thank you for your payment. Your transaction has been processed successfully.
           </p>
 
-          {(amount || transactionId || reference) && (
+          {(invoiceNumber || businessName) && (
             <div className="bg-slate-50 rounded-xl p-4 mb-6 text-left space-y-3">
-              {amount && (
+              {invoiceNumber && (
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-slate-600">Amount Paid</span>
-                  <span className="font-semibold text-slate-900">R{parseFloat(amount).toFixed(2)}</span>
+                  <span className="text-sm text-slate-600">Invoice</span>
+                  <span className="font-semibold text-slate-900">{invoiceNumber}</span>
                 </div>
               )}
-              {reference && (
+              {businessName && (
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-slate-600">Reference</span>
-                  <span className="font-mono text-sm text-slate-900">{reference}</span>
-                </div>
-              )}
-              {transactionId && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-slate-600">Transaction ID</span>
-                  <span className="font-mono text-xs text-slate-700 break-all">{transactionId}</span>
+                  <span className="text-sm text-slate-600">Paid to</span>
+                  <span className="font-medium text-slate-900">{businessName}</span>
                 </div>
               )}
             </div>
@@ -52,7 +67,7 @@ function PaymentSuccessContent() {
 
           <div className="space-y-3">
             <p className="text-sm text-slate-500">
-              A receipt has been sent to your phone via WhatsApp.
+              Your payment has been recorded and the merchant has been notified.
             </p>
 
             <Link
@@ -66,7 +81,7 @@ function PaymentSuccessContent() {
         </div>
 
         <p className="text-center text-sm text-slate-500 mt-6">
-          Powered by MerchantHub
+          Secured by PayFast
         </p>
       </div>
     </div>

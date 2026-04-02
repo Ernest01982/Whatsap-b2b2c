@@ -13,6 +13,10 @@ interface Merchant {
   ozow_site_code: string | null;
   ozow_private_key: string | null;
   ozow_api_key: string | null;
+  payfast_merchant_id: string | null;
+  payfast_merchant_key: string | null;
+  payfast_passphrase: string | null;
+  payfast_sandbox_mode: boolean;
   created_at: string;
 }
 

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
 
 let supabaseAdmin: SupabaseClient | null = null;
@@ -24,100 +23,8 @@ function getSupabaseAdmin(): SupabaseClient {
   return supabaseAdmin;
 }
 
-interface OzowPaymentRequest {
-  SiteCode: string;
-  CountryCode: string;
-  CurrencyCode: string;
-  Amount: string;
-  TransactionReference: string;
-  BankReference: string;
-  Optional1?: string;
-  Optional2?: string;
-  Optional3?: string;
-  Optional4?: string;
-  Optional5?: string;
-  Customer?: string;
-  CancelUrl: string;
-  ErrorUrl: string;
-  SuccessUrl: string;
-  NotifyUrl: string;
-  IsTest: boolean;
-  HashCheck: string;
-}
-
-function generateOzowHash(payload: Omit<OzowPaymentRequest, 'HashCheck'>, privateKey: string): string {
-  const hashString = [
-    payload.SiteCode,
-    payload.CountryCode,
-    payload.CurrencyCode,
-    payload.Amount,
-    payload.TransactionReference,
-    payload.BankReference,
-    payload.Optional1 || '',
-    payload.Optional2 || '',
-    payload.Optional3 || '',
-    payload.Optional4 || '',
-    payload.Optional5 || '',
-    payload.Customer || '',
-    payload.CancelUrl,
-    payload.ErrorUrl,
-    payload.SuccessUrl,
-    payload.NotifyUrl,
-    payload.IsTest.toString(),
-    privateKey,
-  ].join('');
-
-  return crypto.createHash('sha512').update(hashString.toLowerCase()).digest('hex');
-}
-
-async function sendWhatsAppMessage(
-  phoneNumber: string,
-  templateName: string,
-  parameters: string[],
-  whatsappToken: string,
-  whatsappPhoneId: string
-): Promise<boolean> {
-  try {
-    const formattedPhone = phoneNumber.replace(/\D/g, '');
-    const fullPhone = formattedPhone.startsWith('27') ? formattedPhone : `27${formattedPhone.replace(/^0/, '')}`;
-
-    console.log('[WhatsApp] Sending message to:', fullPhone);
-
-    const response = await fetch(`https://graph.facebook.com/v18.0/${whatsappPhoneId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${whatsappToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: fullPhone,
-        type: 'template',
-        template: {
-          name: templateName,
-          language: { code: 'en' },
-          components: [
-            {
-              type: 'body',
-              parameters: parameters.map((text) => ({ type: 'text', text })),
-            },
-          ],
-        },
-      }),
-    });
-
-    const data = await response.json();
-    console.log('[WhatsApp] Response:', JSON.stringify(data, null, 2));
-
-    return response.ok;
-  } catch (error) {
-    console.error('[WhatsApp] Error sending message:', error);
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
-  console.log('[Invoice Send] Starting payment generation...');
+  console.log('[Invoice Send] Starting payment link generation...');
 
   try {
     const authHeader = request.headers.get('authorization');
@@ -156,7 +63,7 @@ export async function POST(request: NextRequest) {
 
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, business_name, ozow_site_code, ozow_private_key, ozow_api_key')
+      .select('id, business_name, payfast_merchant_id, payfast_merchant_key, payfast_sandbox_mode')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -167,10 +74,10 @@ export async function POST(request: NextRequest) {
 
     console.log('[Invoice Send] Merchant found:', merchant.business_name);
 
-    if (!merchant.ozow_site_code || !merchant.ozow_private_key || !merchant.ozow_api_key) {
-      console.error('[Invoice Send] Missing Ozow credentials');
+    if (!merchant.payfast_merchant_id || !merchant.payfast_merchant_key) {
+      console.error('[Invoice Send] Missing PayFast credentials');
       return NextResponse.json(
-        { error: 'Ozow payment credentials not configured. Please update your settings.' },
+        { error: 'PayFast payment credentials not configured. Please update your settings.' },
         { status: 400 }
       );
     }
@@ -179,6 +86,7 @@ export async function POST(request: NextRequest) {
       .from('quotes_invoices')
       .select(`
         id,
+        invoice_number,
         total_amount,
         deposit_amount,
         balance_due,
@@ -214,80 +122,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No amount due for this payment type' }, { status: 400 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com';
-    const transactionRef = `INV-${invoice.id.substring(0, 8).toUpperCase()}-${Date.now()}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || 'https://yourdomain.com';
+    const paymentUrl = `${baseUrl}/pay/${invoice.id}`;
 
-    const ozowPayload: Omit<OzowPaymentRequest, 'HashCheck'> = {
-      SiteCode: merchant.ozow_site_code,
-      CountryCode: 'ZA',
-      CurrencyCode: 'ZAR',
-      Amount: paymentAmount.toFixed(2),
-      TransactionReference: transactionRef,
-      BankReference: `INV-${invoice.id.substring(0, 8).toUpperCase()}`,
-      Optional1: invoice.id,
-      Optional2: isDeposit ? 'deposit' : 'final',
-      Customer: client.phone_number,
-      CancelUrl: `${baseUrl}/payment/cancelled`,
-      ErrorUrl: `${baseUrl}/payment/error`,
-      SuccessUrl: `${baseUrl}/payment/success`,
-      NotifyUrl: `${baseUrl}/api/webhooks/ozow`,
-      IsTest: process.env.NODE_ENV !== 'production',
-    };
-
-    const hashCheck = generateOzowHash(ozowPayload, merchant.ozow_private_key);
-    const fullPayload: OzowPaymentRequest = { ...ozowPayload, HashCheck: hashCheck };
-
-    console.log('[Invoice Send] Generating Ozow payment link...');
-    console.log('[Invoice Send] Payload (without hash):', JSON.stringify(ozowPayload, null, 2));
-
-    const ozowResponse = await fetch('https://api.ozow.com/PostPaymentRequest', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'ApiKey': merchant.ozow_api_key,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(fullPayload),
-    });
-
-    const ozowData = await ozowResponse.json();
-    console.log('[Invoice Send] Ozow response:', JSON.stringify(ozowData, null, 2));
-
-    if (!ozowResponse.ok || !ozowData.url) {
-      console.error('[Invoice Send] Ozow API error:', ozowData);
-      return NextResponse.json(
-        { error: 'Failed to generate payment link', details: ozowData },
-        { status: 500 }
-      );
-    }
-
-    const paymentUrl = ozowData.url;
     console.log('[Invoice Send] Payment URL generated:', paymentUrl);
-
-    const whatsappToken = process.env.WHATSAPP_ACCESS_TOKEN;
-    const whatsappPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-    let whatsappSent = false;
-    if (whatsappToken && whatsappPhoneId) {
-      console.log('[Invoice Send] Sending WhatsApp message...');
-
-      whatsappSent = await sendWhatsAppMessage(
-        client.phone_number,
-        'invoice_payment_request',
-        [
-          client.name,
-          merchant.business_name,
-          `R${paymentAmount.toFixed(2)}`,
-          paymentUrl,
-        ],
-        whatsappToken,
-        whatsappPhoneId
-      );
-
-      console.log('[Invoice Send] WhatsApp sent:', whatsappSent);
-    } else {
-      console.log('[Invoice Send] WhatsApp credentials not configured, skipping message');
-    }
 
     const newStatus = isDeposit ? 'Pending Deposit' : 'Pending Final';
     const { error: updateError } = await supabase
@@ -304,8 +142,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       payment_url: paymentUrl,
-      transaction_reference: transactionRef,
-      whatsapp_sent: whatsappSent,
+      invoice_number: invoice.invoice_number,
       amount: paymentAmount,
       status: newStatus,
     });

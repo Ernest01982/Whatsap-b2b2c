@@ -14,21 +14,24 @@ export default function SettingsPage() {
   const [businessName, setBusinessName] = useState('');
   const [featureInvoicing, setFeatureInvoicing] = useState(true);
   const [featureTicketing, setFeatureTicketing] = useState(false);
-  const [ozowSiteCode, setOzowSiteCode] = useState('');
-  const [ozowPrivateKey, setOzowPrivateKey] = useState('');
-  const [ozowApiKey, setOzowApiKey] = useState('');
 
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [payfastMerchantId, setPayfastMerchantId] = useState('');
+  const [payfastMerchantKey, setPayfastMerchantKey] = useState('');
+  const [payfastPassphrase, setPayfastPassphrase] = useState('');
+  const [payfastSandboxMode, setPayfastSandboxMode] = useState(true);
+
+  const [showMerchantKey, setShowMerchantKey] = useState(false);
+  const [showPassphrase, setShowPassphrase] = useState(false);
 
   useEffect(() => {
     if (merchant) {
       setBusinessName(merchant.business_name || '');
       setFeatureInvoicing(merchant.feature_invoicing);
       setFeatureTicketing(merchant.feature_ticketing);
-      setOzowSiteCode(merchant.ozow_site_code || '');
-      setOzowPrivateKey(merchant.ozow_private_key || '');
-      setOzowApiKey(merchant.ozow_api_key || '');
+      setPayfastMerchantId(merchant.payfast_merchant_id || '');
+      setPayfastMerchantKey(merchant.payfast_merchant_key || '');
+      setPayfastPassphrase(merchant.payfast_passphrase || '');
+      setPayfastSandboxMode(merchant.payfast_sandbox_mode ?? true);
     }
   }, [merchant]);
 
@@ -46,9 +49,10 @@ export default function SettingsPage() {
           business_name: businessName,
           feature_invoicing: featureInvoicing,
           feature_ticketing: featureTicketing,
-          ozow_site_code: ozowSiteCode || null,
-          ozow_private_key: ozowPrivateKey || null,
-          ozow_api_key: ozowApiKey || null,
+          payfast_merchant_id: payfastMerchantId || null,
+          payfast_merchant_key: payfastMerchantKey || null,
+          payfast_passphrase: payfastPassphrase || null,
+          payfast_sandbox_mode: payfastSandboxMode,
         })
         .eq('id', merchant.id);
 
@@ -62,6 +66,13 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const fillSandboxCredentials = () => {
+    setPayfastMerchantId('10044182');
+    setPayfastMerchantKey('52uzfor1jhxxj');
+    setPayfastPassphrase('');
+    setPayfastSandboxMode(true);
   };
 
   return (
@@ -165,70 +176,105 @@ export default function SettingsPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center gap-3">
-          <CreditCard className="w-5 h-5 text-slate-600" />
-          <div>
-            <h2 className="font-semibold text-slate-900">Ozow Payment Integration</h2>
-            <p className="text-sm text-slate-500">Configure your Ozow Instant EFT credentials</p>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CreditCard className="w-5 h-5 text-slate-600" />
+            <div>
+              <h2 className="font-semibold text-slate-900">PayFast Payment Integration</h2>
+              <p className="text-sm text-slate-500">Configure your PayFast payment gateway credentials</p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={fillSandboxCredentials}
+            className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+          >
+            Use Sandbox Credentials
+          </button>
         </div>
         <div className="p-6 space-y-5">
+          <div className="flex items-center justify-between p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="font-medium text-amber-900">Sandbox Mode</p>
+                <p className="text-sm text-amber-700">
+                  {payfastSandboxMode
+                    ? 'Test payments only - no real transactions'
+                    : 'Live mode - real payments will be processed'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPayfastSandboxMode(!payfastSandboxMode)}
+              className={`relative w-12 h-7 rounded-full transition-colors ${
+                payfastSandboxMode ? 'bg-amber-500' : 'bg-emerald-500'
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  payfastSandboxMode ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
           <div>
-            <label htmlFor="ozowSiteCode" className="block text-sm font-medium text-slate-700 mb-2">
-              Site Code
+            <label htmlFor="payfastMerchantId" className="block text-sm font-medium text-slate-700 mb-2">
+              Merchant ID
             </label>
             <input
-              id="ozowSiteCode"
+              id="payfastMerchantId"
               type="text"
-              value={ozowSiteCode}
-              onChange={(e) => setOzowSiteCode(e.target.value)}
+              value={payfastMerchantId}
+              onChange={(e) => setPayfastMerchantId(e.target.value)}
               className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors font-mono text-sm"
-              placeholder="Your Ozow Site Code"
+              placeholder="Your PayFast Merchant ID"
             />
           </div>
 
           <div>
-            <label htmlFor="ozowPrivateKey" className="block text-sm font-medium text-slate-700 mb-2">
-              Private Key
+            <label htmlFor="payfastMerchantKey" className="block text-sm font-medium text-slate-700 mb-2">
+              Merchant Key
             </label>
             <div className="relative">
               <input
-                id="ozowPrivateKey"
-                type={showPrivateKey ? 'text' : 'password'}
-                value={ozowPrivateKey}
-                onChange={(e) => setOzowPrivateKey(e.target.value)}
+                id="payfastMerchantKey"
+                type={showMerchantKey ? 'text' : 'password'}
+                value={payfastMerchantKey}
+                onChange={(e) => setPayfastMerchantKey(e.target.value)}
                 className="w-full px-4 py-3 pr-12 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors font-mono text-sm"
-                placeholder="Your Ozow Private Key"
+                placeholder="Your PayFast Merchant Key"
               />
               <button
                 type="button"
-                onClick={() => setShowPrivateKey(!showPrivateKey)}
+                onClick={() => setShowMerchantKey(!showMerchantKey)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                {showPrivateKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showMerchantKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>
 
           <div>
-            <label htmlFor="ozowApiKey" className="block text-sm font-medium text-slate-700 mb-2">
-              API Key
+            <label htmlFor="payfastPassphrase" className="block text-sm font-medium text-slate-700 mb-2">
+              Passphrase <span className="text-slate-400 font-normal">(Optional)</span>
             </label>
             <div className="relative">
               <input
-                id="ozowApiKey"
-                type={showApiKey ? 'text' : 'password'}
-                value={ozowApiKey}
-                onChange={(e) => setOzowApiKey(e.target.value)}
+                id="payfastPassphrase"
+                type={showPassphrase ? 'text' : 'password'}
+                value={payfastPassphrase}
+                onChange={(e) => setPayfastPassphrase(e.target.value)}
                 className="w-full px-4 py-3 pr-12 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors font-mono text-sm"
-                placeholder="Your Ozow API Key"
+                placeholder="Your PayFast Passphrase (if enabled)"
               />
               <button
                 type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
+                onClick={() => setShowPassphrase(!showPassphrase)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                {showApiKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showPassphrase ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>
@@ -236,13 +282,14 @@ export default function SettingsPage() {
           <p className="text-sm text-slate-500">
             Get your credentials from the{' '}
             <a
-              href="https://ozow.com"
+              href="https://www.payfast.co.za/dashboard"
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-600 hover:underline"
             >
-              Ozow Merchant Portal
+              PayFast Dashboard
             </a>
+            {' '}or use the sandbox credentials for testing.
           </p>
         </div>
       </div>

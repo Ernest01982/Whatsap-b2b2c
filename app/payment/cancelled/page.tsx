@@ -2,12 +2,32 @@
 
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Circle as XCircle, ArrowLeft, RefreshCw, Chrome as Home } from 'lucide-react';
-import { Suspense } from 'react';
+import { Circle as XCircle, Chrome as Home, RotateCcw } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 function PaymentCancelledContent() {
   const searchParams = useSearchParams();
-  const reference = searchParams.get('TransactionReference');
+  const invoiceId = searchParams.get('invoice_id');
+  const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchInvoice() {
+      if (!invoiceId) return;
+
+      const { data } = await supabase
+        .from('invoices')
+        .select('invoice_number')
+        .eq('id', invoiceId)
+        .maybeSingle();
+
+      if (data) {
+        setInvoiceNumber(data.invoice_number);
+      }
+    }
+
+    fetchInvoice();
+  }, [invoiceId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-white flex items-center justify-center p-4">
@@ -25,11 +45,11 @@ function PaymentCancelledContent() {
             Your payment was cancelled. No charges have been made to your account.
           </p>
 
-          {reference && (
+          {invoiceNumber && (
             <div className="bg-slate-50 rounded-xl p-4 mb-6">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-600">Reference</span>
-                <span className="font-mono text-sm text-slate-900">{reference}</span>
+                <span className="text-sm text-slate-600">Invoice</span>
+                <span className="font-semibold text-slate-900">{invoiceNumber}</span>
               </div>
             </div>
           )}
@@ -38,6 +58,16 @@ function PaymentCancelledContent() {
             <p className="text-sm text-slate-500 mb-4">
               If you experienced any issues, please contact the merchant directly.
             </p>
+
+            {invoiceId && (
+              <Link
+                href={`/pay/${invoiceId}`}
+                className="inline-flex items-center justify-center gap-2 w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+              >
+                <RotateCcw className="w-5 h-5" />
+                Try Again
+              </Link>
+            )}
 
             <Link
               href="/"
@@ -50,7 +80,7 @@ function PaymentCancelledContent() {
         </div>
 
         <p className="text-center text-sm text-slate-500 mt-6">
-          Powered by MerchantHub
+          Secured by PayFast
         </p>
       </div>
     </div>
