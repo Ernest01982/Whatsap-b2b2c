@@ -193,9 +193,11 @@ export default function InvoiceDetailPage() {
 
     let phone = invoice.clients.phone_number.replace(/\D/g, '');
     if (phone.startsWith('0')) {
-      phone = '27' + phone.substring(1);
-    } else if (!phone.startsWith('27') && phone.length === 9) {
-      phone = '27' + phone;
+      phone = '+27' + phone.substring(1);
+    } else if (!phone.startsWith('27') && !phone.startsWith('+27') && phone.length === 9) {
+      phone = '+27' + phone;
+    } else if (phone.startsWith('27')) {
+      phone = '+' + phone;
     }
     const message = encodeURIComponent(getWhatsAppMessage());
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
