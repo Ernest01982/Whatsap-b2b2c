@@ -22,6 +22,12 @@ interface Invoice {
   };
 }
 
+interface ShareModalState {
+  invoice: Invoice;
+  paymentUrl: string | null;
+  loading: boolean;
+}
+
 const statusStyles: Record<string, string> = {
   Draft: 'bg-slate-100 text-slate-700',
   'Pending Deposit': 'bg-amber-100 text-amber-700',
@@ -36,7 +42,7 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [shareModal, setShareModal] = useState<Invoice | null>(null);
+  const [shareModal, setShareModal] = useState<ShareModalState | null>(null);
   const [copied, setCopied] = useState(false);
 
   const fetchInvoices = async () => {
@@ -165,15 +171,42 @@ export default function InvoicesPage() {
     }
   };
 
-  const getPaymentUrl = (invoiceId: string) => {
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-    return `${baseUrl}/pay/${invoiceId}`;
+  const openShareModal = async (invoice: Invoice) => {
+    if (!session?.access_token) return;
+
+    setShareModal({ invoice, paymentUrl: null, loading: true });
+
+    try {
+      const paymentType = invoice.deposit_amount > 0 && invoice.amount_paid === 0 ? 'deposit' : 'final';
+
+      const response = await fetch('/api/invoices/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          invoice_id: invoice.id,
+          payment_type: paymentType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate payment link');
+      }
+
+      setShareModal({ invoice, paymentUrl: data.payment_url, loading: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate payment link');
+      setShareModal(null);
+    }
   };
 
-  const getWhatsAppMessage = (invoice: Invoice) => {
+  const getWhatsAppMessage = (invoice: Invoice, paymentUrl: string) => {
     if (!merchant) return '';
 
-    const paymentUrl = getPaymentUrl(invoice.id);
     const amount = invoice.deposit_amount > 0 && invoice.amount_paid === 0
       ? invoice.deposit_amount
       : invoice.balance_due;
@@ -192,25 +225,25 @@ ${paymentUrl}
 Thank you for your business!`;
   };
 
-  const openWhatsApp = (invoice: Invoice) => {
-    if (!invoice.clients?.phone_number) return;
+  const openWhatsApp = () => {
+    if (!shareModal?.invoice?.clients?.phone_number || !shareModal?.paymentUrl) return;
 
-    const phone = invoice.clients.phone_number.replace(/\D/g, '');
+    const phone = shareModal.invoice.clients.phone_number.replace(/\D/g, '');
     const fullPhone = phone.startsWith('27') ? phone : `27${phone.replace(/^0/, '')}`;
-    const message = encodeURIComponent(getWhatsAppMessage(invoice));
+    const message = encodeURIComponent(getWhatsAppMessage(shareModal.invoice, shareModal.paymentUrl));
     window.open(`https://wa.me/${fullPhone}?text=${message}`, '_blank');
   };
 
-  const copyPaymentLink = async (invoice: Invoice) => {
-    const paymentUrl = getPaymentUrl(invoice.id);
+  const copyPaymentLink = async () => {
+    if (!shareModal?.paymentUrl) return;
 
     try {
-      await navigator.clipboard.writeText(paymentUrl);
+      await navigator.clipboard.writeText(shareModal.paymentUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       const textarea = document.createElement('textarea');
-      textarea.value = paymentUrl;
+      textarea.value = shareModal.paymentUrl;
       document.body.appendChild(textarea);
       textarea.select();
       document.execCommand('copy');
@@ -220,8 +253,10 @@ Thank you for your business!`;
     }
   };
 
-  const copyFullMessage = async (invoice: Invoice) => {
-    const message = getWhatsAppMessage(invoice);
+  const copyFullMessage = async () => {
+    if (!shareModal?.invoice || !shareModal?.paymentUrl) return;
+
+    const message = getWhatsAppMessage(shareModal.invoice, shareModal.paymentUrl);
 
     try {
       await navigator.clipboard.writeText(message);
@@ -358,7 +393,7 @@ Thank you for your business!`;
                           <span className="hidden sm:inline">PDF</span>
                         </button>
                         <button
-                          onClick={() => setShareModal(invoice)}
+                          onClick={() => openShareModal(invoice)}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
                           title="Share via WhatsApp"
                         >
@@ -401,58 +436,67 @@ Thank you for your business!`;
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Client</p>
-                <p className="font-medium text-slate-900">{shareModal.clients?.name}</p>
-              </div>
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Amount Due</p>
-                <p className="font-medium text-slate-900">
-                  {formatCurrency(
-                    shareModal.deposit_amount > 0 && shareModal.amount_paid === 0
-                      ? shareModal.deposit_amount
-                      : shareModal.balance_due
-                  )}
-                </p>
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-4">
-                <p className="text-sm text-slate-600 mb-2">Payment Link:</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-white border border-slate-200 rounded px-2 py-1.5 overflow-x-auto">
-                    {getPaymentUrl(shareModal.id)}
-                  </code>
-                  <button
-                    onClick={() => copyPaymentLink(shareModal)}
-                    className="flex items-center gap-1 px-2 py-1.5 text-slate-700 hover:bg-slate-200 rounded transition-colors"
-                    title="Copy link"
-                  >
-                    {copied ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
+              {shareModal.loading ? (
+                <div className="py-8 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-slate-400 mx-auto" />
+                  <p className="mt-2 text-slate-600">Generating payment link...</p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Client</p>
+                    <p className="font-medium text-slate-900">{shareModal.invoice.clients?.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Amount Due</p>
+                    <p className="font-medium text-slate-900">
+                      {formatCurrency(
+                        shareModal.invoice.deposit_amount > 0 && shareModal.invoice.amount_paid === 0
+                          ? shareModal.invoice.deposit_amount
+                          : shareModal.invoice.balance_due
+                      )}
+                    </p>
+                  </div>
 
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => openWhatsApp(shareModal)}
-                  className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  Send via WhatsApp
-                  <ExternalLink className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => copyFullMessage(shareModal)}
-                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
-                >
-                  <Copy className="w-4 h-4" />
-                  {copied ? 'Copied!' : 'Copy Full Message'}
-                </button>
-              </div>
+                  <div className="bg-slate-50 rounded-lg p-4">
+                    <p className="text-sm text-slate-600 mb-2">Payment Link:</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs bg-white border border-slate-200 rounded px-2 py-1.5 overflow-x-auto break-all">
+                        {shareModal.paymentUrl}
+                      </code>
+                      <button
+                        onClick={copyPaymentLink}
+                        className="flex items-center gap-1 px-2 py-1.5 text-slate-700 hover:bg-slate-200 rounded transition-colors flex-shrink-0"
+                        title="Copy link"
+                      >
+                        {copied ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
 
-              <p className="text-xs text-slate-500 text-center">
-                Opens WhatsApp with a pre-filled message containing the payment link
-              </p>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={openWhatsApp}
+                      className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
+                    >
+                      <MessageCircle className="w-5 h-5" />
+                      Send via WhatsApp
+                      <ExternalLink className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={copyFullMessage}
+                      className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                      {copied ? 'Copied!' : 'Copy Full Message'}
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-slate-500 text-center">
+                    Opens WhatsApp with a pre-filled message containing the PayFast payment link
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
