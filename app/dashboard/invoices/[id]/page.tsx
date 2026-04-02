@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { FileText, ArrowLeft, Loader as Loader2, CircleAlert as AlertCircle, User, Phone, Mail, Trash2 } from 'lucide-react';
+import { FileText, ArrowLeft, Loader as Loader2, CircleAlert as AlertCircle, User, Phone, Mail, Trash2, Send, MessageCircle, Copy, CircleCheck as CheckCircle, ExternalLink } from 'lucide-react';
 
 interface InvoiceItem {
   id: string;
@@ -50,6 +50,10 @@ export default function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+  const [sendingPayment, setSendingPayment] = useState(false);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showSendOptions, setShowSendOptions] = useState(false);
 
   useEffect(() => {
     const fetchInvoice = async () => {
@@ -133,6 +137,101 @@ export default function InvoiceDetailPage() {
       month: 'long',
       year: 'numeric',
     });
+  };
+
+  const generatePaymentLink = async (paymentType: 'deposit' | 'final') => {
+    if (!invoice) return;
+
+    setSendingPayment(true);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await fetch('/api/invoices/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          invoice_id: invoice.id,
+          payment_type: paymentType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate payment link');
+      }
+
+      setPaymentUrl(data.payment_url);
+      setShowSendOptions(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate payment link');
+    } finally {
+      setSendingPayment(false);
+    }
+  };
+
+  const getWhatsAppMessage = () => {
+    if (!invoice || !paymentUrl || !merchant) return '';
+
+    const amount = invoice.deposit_amount > 0 && invoice.amount_paid === 0
+      ? invoice.deposit_amount
+      : invoice.balance_due;
+
+    const paymentType = invoice.deposit_amount > 0 && invoice.amount_paid === 0 ? 'deposit' : 'balance';
+
+    return `Hi ${invoice.clients?.name},\n\nThis is a payment request from ${merchant.business_name}.\n\nAmount due (${paymentType}): R${amount.toFixed(2)}\n\nPay securely here:\n${paymentUrl}\n\nThank you for your business!`;
+  };
+
+  const openWhatsApp = () => {
+    if (!invoice?.clients?.phone_number || !paymentUrl) return;
+
+    const phone = invoice.clients.phone_number.replace(/\D/g, '');
+    const message = encodeURIComponent(getWhatsAppMessage());
+    window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+  };
+
+  const copyPaymentLink = async () => {
+    if (!paymentUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(paymentUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = paymentUrl;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const copyFullMessage = async () => {
+    const message = getWhatsAppMessage();
+
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = message;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   if (loading) {
@@ -317,6 +416,105 @@ export default function InvoiceDetailPage() {
           </table>
         </div>
       </div>
+
+      {invoice.status !== 'Paid' && invoice.status !== 'Cancelled' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <h2 className="font-semibold text-slate-900">Send Payment Request</h2>
+            <p className="text-sm text-slate-600 mt-1">Generate a payment link and send it via your own WhatsApp</p>
+          </div>
+          <div className="p-6">
+            {!showSendOptions ? (
+              <div className="flex flex-wrap gap-3">
+                {invoice.deposit_amount > 0 && invoice.amount_paid === 0 && (
+                  <button
+                    onClick={() => generatePaymentLink('deposit')}
+                    disabled={sendingPayment}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {sendingPayment ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Request Deposit ({formatCurrency(invoice.deposit_amount)})
+                  </button>
+                )}
+                {invoice.balance_due > 0 && (invoice.amount_paid > 0 || invoice.deposit_amount === 0) && (
+                  <button
+                    onClick={() => generatePaymentLink('final')}
+                    disabled={sendingPayment}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {sendingPayment ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Request Final Payment ({formatCurrency(invoice.balance_due)})
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 rounded-lg p-3">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">Payment link generated!</span>
+                </div>
+
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <p className="text-sm text-slate-600 mb-2">Payment Link:</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-sm bg-white border border-slate-200 rounded px-3 py-2 overflow-x-auto">
+                      {paymentUrl}
+                    </code>
+                    <button
+                      onClick={copyPaymentLink}
+                      className="flex items-center gap-1.5 px-3 py-2 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
+                    >
+                      {copied ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-4">
+                  <p className="text-sm font-medium text-slate-700 mb-3">Send to client:</p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={openWhatsApp}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      Open WhatsApp
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={copyFullMessage}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy Full Message
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3">
+                    Click &quot;Open WhatsApp&quot; to send via your WhatsApp account, or copy the message to send manually.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowSendOptions(false);
+                    setPaymentUrl(null);
+                  }}
+                  className="text-sm text-slate-600 hover:text-slate-900 underline"
+                >
+                  Generate new link
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-end pt-4">
         <button
