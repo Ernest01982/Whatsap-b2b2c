@@ -172,18 +172,22 @@ export default function InvoicesPage() {
   };
 
   const openShareModal = async (invoice: Invoice) => {
-    if (!session?.access_token) return;
-
     setShareModal({ invoice, paymentUrl: null, loading: true });
 
     try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+      if (!currentSession?.access_token) {
+        throw new Error('Please sign in again to continue');
+      }
+
       const paymentType = invoice.deposit_amount > 0 && invoice.amount_paid === 0 ? 'deposit' : 'final';
 
       const response = await fetch('/api/invoices/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${currentSession.access_token}`,
         },
         body: JSON.stringify({
           invoice_id: invoice.id,
