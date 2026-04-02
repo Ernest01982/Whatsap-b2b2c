@@ -52,6 +52,19 @@ function buildPayfastUrl(
 export async function POST(request: NextRequest) {
   console.log('[Invoice Send] Starting payment link generation...');
 
+  let body: { invoice_id?: string; payment_type?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  const { invoice_id, payment_type } = body;
+
+  if (!invoice_id) {
+    return NextResponse.json({ error: 'Invoice ID is required' }, { status: 400 });
+  }
+
   try {
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -77,14 +90,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[Invoice Send] Authenticated user:', user.id);
-
-    const body = await request.json();
-    const { invoice_id, payment_type } = body;
-
-    if (!invoice_id) {
-      return NextResponse.json({ error: 'Invoice ID is required' }, { status: 400 });
-    }
-
     console.log('[Invoice Send] Processing invoice:', invoice_id, 'Payment type:', payment_type);
 
     const { data: merchant, error: merchantError } = await supabase
