@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
 
+// Tell Next.js NEVER to cache this API route
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   console.log('[Invoice Send] Starting payment link generation...');
 
@@ -26,25 +29,25 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '');
+    
+    // 1. Fetch environment variables directly inside the request
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-       console.error('[Invoice Send] Missing NEXT_PUBLIC_SUPABASE variables');
-       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('[Invoice Send] Missing Supabase environment variables');
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
-    // Safely create a Supabase client using the Anon key and the user's active session token
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    // 2. Create a FRESH client for every request to avoid Next.js caching crashes
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
       },
     });
 
-    // Get user directly based on the token passed in the header
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
       console.error('[Invoice Send] Invalid token:', authError);
@@ -94,6 +97,8 @@ export async function POST(request: NextRequest) {
       console.error('[Invoice Send] Invoice not found:', invoiceError);
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
+
+    console.log('[Invoice Send] Invoice found:', invoice.id, 'Status:', invoice.status);
 
     const isDeposit = payment_type === 'deposit';
     const paymentAmount = isDeposit ? invoice.deposit_amount : invoice.balance_due;
