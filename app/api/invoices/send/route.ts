@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
+import {
+  generatePayfastSignature,
+  PAYFAST_SANDBOX_URL,
+  PAYFAST_PRODUCTION_URL,
+  PAYFAST_SANDBOX_MERCHANT_ID,
+  PAYFAST_SANDBOX_MERCHANT_KEY,
+  PAYFAST_SANDBOX_PASSPHRASE,
+} from '@/lib/payfast';
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -21,6 +29,24 @@ function getSupabaseAdmin(): SupabaseClient {
     });
   }
   return supabaseAdmin;
+}
+
+function buildPayfastUrl(
+  baseUrl: string,
+  data: Record<string, string>,
+  passphrase?: string
+): string {
+  const signature = generatePayfastSignature(data, passphrase);
+
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(data)) {
+    if (value) {
+      params.append(key, value);
+    }
+  }
+  params.append('signature', signature);
+
+  return `${baseUrl}?${params.toString()}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -63,7 +89,7 @@ export async function POST(request: NextRequest) {
 
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, business_name, payfast_merchant_id, payfast_merchant_key, payfast_sandbox_mode')
+      .select('id, business_name, payfast_merchant_id, payfast_merchant_key, payfast_passphrase, payfast_sandbox_mode')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -73,14 +99,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[Invoice Send] Merchant found:', merchant.business_name);
-
-    if (!merchant.payfast_merchant_id || !merchant.payfast_merchant_key) {
-      console.error('[Invoice Send] Missing PayFast credentials');
-      return NextResponse.json(
-        { error: 'PayFast payment credentials not configured. Please update your settings.' },
-        { status: 400 }
-      );
-    }
 
     const { data: invoice, error: invoiceError } = await supabase
       .from('quotes_invoices')
@@ -95,6 +113,7 @@ export async function POST(request: NextRequest) {
         clients (
           id,
           name,
+          email_address,
           phone_number
         )
       `)
@@ -109,7 +128,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[Invoice Send] Invoice found:', invoice.id, 'Status:', invoice.status);
 
-    const client = invoice.clients as unknown as { id: string; name: string; phone_number: string };
+    const client = invoice.clients as unknown as { id: string; name: string; email_address?: string; phone_number: string };
     if (!client) {
       console.error('[Invoice Send] Client not found for invoice');
       return NextResponse.json({ error: 'Client not found for invoice' }, { status: 404 });
@@ -122,10 +141,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No amount due for this payment type' }, { status: 400 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || 'https://yourdomain.com';
-    const paymentUrl = `${baseUrl}/pay/${invoice.id}`;
+    const useSandbox = merchant.payfast_sandbox_mode ?? true;
+    const merchantId = useSandbox
+      ? PAYFAST_SANDBOX_MERCHANT_ID
+      : (merchant.payfast_merchant_id || PAYFAST_SANDBOX_MERCHANT_ID);
+    const merchantKey = useSandbox
+      ? PAYFAST_SANDBOX_MERCHANT_KEY
+      : (merchant.payfast_merchant_key || PAYFAST_SANDBOX_MERCHANT_KEY);
+    const passphrase = useSandbox
+      ? PAYFAST_SANDBOX_PASSPHRASE
+      : (merchant.payfast_passphrase || undefined);
+    const payfastBaseUrl = useSandbox ? PAYFAST_SANDBOX_URL : PAYFAST_PRODUCTION_URL;
 
-    console.log('[Invoice Send] Payment URL generated:', paymentUrl);
+    const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || 'https://yourdomain.com';
+
+    const paymentData: Record<string, string> = {
+      merchant_id: merchantId,
+      merchant_key: merchantKey,
+      return_url: `${appBaseUrl}/payment/success?invoice_id=${invoice.id}`,
+      cancel_url: `${appBaseUrl}/payment/cancelled?invoice_id=${invoice.id}`,
+      notify_url: `${appBaseUrl}/api/webhooks/payfast`,
+      name_first: client.name?.split(' ')[0] || 'Customer',
+      m_payment_id: invoice.id,
+      amount: paymentAmount.toFixed(2),
+      item_name: `Invoice ${invoice.invoice_number || 'Payment'}`,
+      item_description: `Payment for ${merchant.business_name || 'services'}`,
+    };
+
+    if (client.email_address) {
+      paymentData.email_address = client.email_address;
+    }
+
+    const paymentUrl = buildPayfastUrl(payfastBaseUrl, paymentData, passphrase);
+
+    console.log('[Invoice Send] PayFast URL generated');
 
     const newStatus = isDeposit ? 'Pending Deposit' : 'Pending Final';
     const { error: updateError } = await supabase
