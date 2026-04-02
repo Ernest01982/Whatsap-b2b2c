@@ -3,69 +3,35 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Loader as Loader2, CircleAlert as AlertCircle, CreditCard } from 'lucide-react';
+import { Loader as Loader2, CircleAlert as AlertCircle, CreditCard, Shield } from 'lucide-react';
+import {
+  generatePayfastSignature,
+  PAYFAST_SANDBOX_URL,
+  PAYFAST_PRODUCTION_URL,
+  PAYFAST_SANDBOX_MERCHANT_ID,
+  PAYFAST_SANDBOX_MERCHANT_KEY,
+  PAYFAST_SANDBOX_PASSPHRASE,
+  PayfastPaymentData,
+} from '@/lib/payfast';
 
-interface PaymentData {
-  merchant_id: string;
-  merchant_key: string;
-  return_url: string;
-  cancel_url: string;
-  notify_url: string;
-  name_first: string;
-  email_address: string;
-  m_payment_id: string;
-  amount: string;
-  item_name: string;
-  item_description: string;
-  signature?: string;
-}
-
-async function generateMD5(message: string): Promise<string> {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('MD5', msgBuffer).catch(() => null);
-
-  if (!hashBuffer) {
-    let hash = 0;
-    for (let i = 0; i < message.length; i++) {
-      const char = message.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16).padStart(32, '0');
-  }
-
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function generateSignature(data: Record<string, string>, passphrase?: string): Promise<string> {
-  const sortedKeys = [
-    'merchant_id', 'merchant_key', 'return_url', 'cancel_url', 'notify_url',
-    'name_first', 'name_last', 'email_address', 'cell_number',
-    'm_payment_id', 'amount', 'item_name', 'item_description',
-    'custom_int1', 'custom_int2', 'custom_int3', 'custom_int4', 'custom_int5',
-    'custom_str1', 'custom_str2', 'custom_str3', 'custom_str4', 'custom_str5',
-    'email_confirmation', 'confirmation_address', 'payment_method'
-  ];
-
-  const params: string[] = [];
-  for (const key of sortedKeys) {
-    if (data[key] !== undefined && data[key] !== '') {
-      params.push(`${key}=${encodeURIComponent(data[key]).replace(/%20/g, '+')}`);
-    }
-  }
-
-  if (passphrase) {
-    params.push(`passphrase=${encodeURIComponent(passphrase).replace(/%20/g, '+')}`);
-  }
-
-  const paramString = params.join('&');
-
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(paramString);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+interface InvoiceData {
+  id: string;
+  total_amount: number;
+  deposit_amount: number;
+  amount_paid: number;
+  balance_due: number;
+  status: string;
+  clients: {
+    name: string;
+    email_address: string | null;
+  } | null;
+  merchants: {
+    business_name: string;
+    payfast_merchant_id: string | null;
+    payfast_merchant_key: string | null;
+    payfast_passphrase: string | null;
+    payfast_sandbox_mode: boolean | null;
+  } | null;
 }
 
 export default function PaymentPage() {
@@ -75,17 +41,24 @@ export default function PaymentPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [paymentData, setPaymentData] = useState<PaymentData | null>(null);
+  const [invoice, setInvoice] = useState<InvoiceData | null>(null);
+  const [paymentData, setPaymentData] = useState<PayfastPaymentData | null>(null);
   const [payfastUrl, setPayfastUrl] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
 
   useEffect(() => {
-    async function fetchInvoiceAndPreparePayment() {
+    async function fetchInvoice() {
       try {
-        const { data: invoice, error: invoiceError } = await supabase
+        const { data: invoiceData, error: invoiceError } = await supabase
           .from('quotes_invoices')
           .select(`
-            *,
+            id,
+            total_amount,
+            deposit_amount,
+            amount_paid,
+            balance_due,
+            status,
             clients (name, email_address),
             merchants (
               business_name,
@@ -99,84 +72,106 @@ export default function PaymentPage() {
           .maybeSingle();
 
         if (invoiceError) throw invoiceError;
-        if (!invoice) {
+        if (!invoiceData) {
           setError('Invoice not found');
           setLoading(false);
           return;
         }
 
-        const merchant = invoice.merchants;
-        if (!merchant?.payfast_merchant_id || !merchant?.payfast_merchant_key) {
-          setError('Payment gateway not configured. Please contact the merchant.');
-          setLoading(false);
-          return;
-        }
-
-        const balanceDue = invoice.balance_due || invoice.total_amount;
-        if (balanceDue <= 0) {
-          setError('This invoice has already been paid.');
-          setLoading(false);
-          return;
-        }
-
-        const baseUrl = window.location.origin;
-        const sandboxMode = merchant.payfast_sandbox_mode ?? true;
-
-        const data: Record<string, string> = {
-          merchant_id: merchant.payfast_merchant_id,
-          merchant_key: merchant.payfast_merchant_key,
-          return_url: `${baseUrl}/payment/success?invoice_id=${invoiceId}`,
-          cancel_url: `${baseUrl}/payment/cancelled?invoice_id=${invoiceId}`,
-          notify_url: `${baseUrl}/api/webhooks/payfast`,
-          name_first: invoice.clients?.name?.split(' ')[0] || 'Customer',
-          email_address: invoice.clients?.email_address || '',
-          m_payment_id: invoiceId,
-          amount: balanceDue.toFixed(2),
-          item_name: `Invoice Payment`,
-          item_description: `Payment for ${merchant.business_name || 'services'}`,
-        };
-
-        const signature = await generateSignature(data, merchant.payfast_passphrase || undefined);
-
-        setPaymentData({
-          ...data,
-          signature,
-        } as PaymentData);
-
-        setPayfastUrl(sandboxMode
-          ? 'https://sandbox.payfast.co.za/eng/process'
-          : 'https://www.payfast.co.za/eng/process'
-        );
-
+        setInvoice(invoiceData as unknown as InvoiceData);
         setLoading(false);
       } catch (err) {
-        console.error('Error preparing payment:', err);
-        setError('Failed to prepare payment. Please try again.');
+        console.error('Error fetching invoice:', err);
+        setError('Failed to load invoice. Please try again.');
         setLoading(false);
       }
     }
 
     if (invoiceId) {
-      fetchInvoiceAndPreparePayment();
+      fetchInvoice();
     }
   }, [invoiceId]);
+
+  const preparePayment = () => {
+    if (!invoice) return;
+
+    const merchant = invoice.merchants;
+
+    const useSandbox = merchant?.payfast_sandbox_mode ?? true;
+    const merchantId = useSandbox
+      ? PAYFAST_SANDBOX_MERCHANT_ID
+      : (merchant?.payfast_merchant_id || PAYFAST_SANDBOX_MERCHANT_ID);
+    const merchantKey = useSandbox
+      ? PAYFAST_SANDBOX_MERCHANT_KEY
+      : (merchant?.payfast_merchant_key || PAYFAST_SANDBOX_MERCHANT_KEY);
+    const passphrase = useSandbox
+      ? PAYFAST_SANDBOX_PASSPHRASE
+      : (merchant?.payfast_passphrase || undefined);
+
+    if (!merchantId || !merchantKey) {
+      setError('Payment gateway not configured. Please contact the merchant.');
+      return;
+    }
+
+    const balanceDue = invoice.balance_due > 0 ? invoice.balance_due : invoice.total_amount;
+    if (balanceDue <= 0) {
+      setError('This invoice has already been paid.');
+      return;
+    }
+
+    const baseUrl = window.location.origin;
+
+    const data: Record<string, string> = {
+      merchant_id: merchantId,
+      merchant_key: merchantKey,
+      return_url: `${baseUrl}/payment/success?invoice_id=${invoiceId}`,
+      cancel_url: `${baseUrl}/payment/cancelled?invoice_id=${invoiceId}`,
+      notify_url: `${baseUrl}/api/webhooks/payfast`,
+      name_first: invoice.clients?.name?.split(' ')[0] || 'Customer',
+      m_payment_id: invoiceId,
+      amount: balanceDue.toFixed(2),
+      item_name: `Invoice Payment`,
+      item_description: `Payment for ${merchant?.business_name || 'services'}`,
+    };
+
+    if (invoice.clients?.email_address) {
+      data.email_address = invoice.clients.email_address;
+    }
+
+    const signature = generatePayfastSignature(data, passphrase);
+
+    setPaymentData({
+      ...data,
+      signature,
+    } as PayfastPaymentData);
+
+    setPayfastUrl(useSandbox ? PAYFAST_SANDBOX_URL : PAYFAST_PRODUCTION_URL);
+    setShowDetails(false);
+  };
 
   useEffect(() => {
     if (paymentData && formRef.current && !submitted) {
       setSubmitted(true);
       setTimeout(() => {
         formRef.current?.submit();
-      }, 1500);
+      }, 1000);
     }
   }, [paymentData, submitted]);
 
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency: 'ZAR',
+    }).format(amount);
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
           <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mx-auto mb-4" />
-          <h1 className="text-xl font-semibold text-slate-900 mb-2">Preparing Payment</h1>
-          <p className="text-slate-600">Please wait while we set up your secure payment...</p>
+          <h1 className="text-xl font-semibold text-slate-900 mb-2">Loading Invoice</h1>
+          <p className="text-slate-600">Please wait...</p>
         </div>
       </div>
     );
@@ -184,10 +179,10 @@ export default function PaymentPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="w-6 h-6 text-red-500" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-red-500" />
           </div>
           <h1 className="text-xl font-semibold text-slate-900 mb-2">Payment Error</h1>
           <p className="text-slate-600 mb-6">{error}</p>
@@ -202,23 +197,114 @@ export default function PaymentPage() {
     );
   }
 
+  if (invoice?.status === 'Paid') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Shield className="w-8 h-8 text-emerald-600" />
+          </div>
+          <h1 className="text-xl font-semibold text-slate-900 mb-2">Already Paid</h1>
+          <p className="text-slate-600 mb-6">This invoice has already been paid. Thank you!</p>
+          <a
+            href="/"
+            className="inline-block px-6 py-3 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors"
+          >
+            Return Home
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (showDetails && invoice) {
+    const amountDue = invoice.balance_due > 0 ? invoice.balance_due : invoice.total_amount;
+    const isDeposit = invoice.deposit_amount > 0 && invoice.amount_paid === 0;
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+          <div className="bg-emerald-600 px-6 py-8 text-center">
+            <h1 className="text-white text-xl font-semibold mb-1">
+              {invoice.merchants?.business_name || 'Invoice Payment'}
+            </h1>
+            <p className="text-emerald-100 text-sm">Secure Payment</p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div className="text-center">
+              <p className="text-slate-500 text-sm mb-1">
+                {isDeposit ? 'Deposit Amount Due' : 'Amount Due'}
+              </p>
+              <p className="text-4xl font-bold text-slate-900">
+                {formatCurrency(amountDue)}
+              </p>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Invoice Total</span>
+                <span className="font-medium text-slate-900">
+                  {formatCurrency(invoice.total_amount)}
+                </span>
+              </div>
+              {invoice.deposit_amount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Deposit Required</span>
+                  <span className="font-medium text-slate-900">
+                    {formatCurrency(invoice.deposit_amount)}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Amount Paid</span>
+                <span className="font-medium text-slate-900">
+                  {formatCurrency(invoice.amount_paid || 0)}
+                </span>
+              </div>
+              <div className="border-t border-slate-200 pt-3 flex justify-between">
+                <span className="font-medium text-slate-900">Balance Due</span>
+                <span className="font-bold text-emerald-600">
+                  {formatCurrency(amountDue)}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={preparePayment}
+              className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              <CreditCard className="w-5 h-5" />
+              Pay Now with PayFast
+            </button>
+
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+              <Shield className="w-4 h-4" />
+              <span>Secured by PayFast</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center">
-        <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <CreditCard className="w-6 h-6 text-emerald-600" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+        <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CreditCard className="w-8 h-8 text-emerald-600" />
         </div>
         <h1 className="text-xl font-semibold text-slate-900 mb-2">Redirecting to PayFast</h1>
         <p className="text-slate-600 mb-4">
           You are being redirected to PayFast to complete your payment of{' '}
-          <span className="font-semibold">R {paymentData?.amount}</span>
+          <span className="font-semibold">{paymentData?.amount ? `R ${paymentData.amount}` : ''}</span>
         </p>
-        <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mx-auto mb-4" />
+        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mx-auto mb-4" />
         <p className="text-sm text-slate-500">
           If you are not redirected automatically,{' '}
           <button
             onClick={() => formRef.current?.submit()}
-            className="text-emerald-600 hover:underline"
+            className="text-emerald-600 hover:underline font-medium"
           >
             click here
           </button>

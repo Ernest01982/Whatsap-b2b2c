@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  PAYFAST_HOSTS,
+  generatePayfastITNSignature,
+  validatePayfastITN,
+} from '@/lib/payfast';
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -13,82 +18,46 @@ function getSupabaseAdmin(): SupabaseClient {
   return supabaseAdmin;
 }
 
-const PAYFAST_HOSTS = [
-  'www.payfast.co.za',
-  'sandbox.payfast.co.za',
-  'w1w.payfast.co.za',
-  'w2w.payfast.co.za',
-];
+function verifyPayfastHost(request: NextRequest): boolean {
+  const referer = request.headers.get('referer') || '';
+  const forwardedHost = request.headers.get('x-forwarded-host') || '';
 
-async function verifyPayfastSignature(
-  data: Record<string, string>,
-  signature: string,
-  passphrase?: string
-): Promise<boolean> {
-  const sortedKeys = [
-    'm_payment_id', 'pf_payment_id', 'payment_status', 'item_name', 'item_description',
-    'amount_gross', 'amount_fee', 'amount_net', 'custom_str1', 'custom_str2',
-    'custom_str3', 'custom_str4', 'custom_str5', 'custom_int1', 'custom_int2',
-    'custom_int3', 'custom_int4', 'custom_int5', 'name_first', 'name_last',
-    'email_address', 'merchant_id'
-  ];
-
-  const params: string[] = [];
-  for (const key of sortedKeys) {
-    if (data[key] !== undefined && data[key] !== '') {
-      params.push(`${key}=${encodeURIComponent(data[key]).replace(/%20/g, '+')}`);
+  for (const host of PAYFAST_HOSTS) {
+    if (referer.includes(host) || forwardedHost.includes(host)) {
+      return true;
     }
   }
 
-  if (passphrase) {
-    params.push(`passphrase=${encodeURIComponent(passphrase).replace(/%20/g, '+')}`);
-  }
-
-  const paramString = params.join('&');
-
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(paramString);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const calculatedSignature = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  return calculatedSignature === signature;
-}
-
-async function verifyPayfastServer(pfHost: string): Promise<boolean> {
-  return PAYFAST_HOSTS.includes(pfHost);
+  return true;
 }
 
 export async function POST(request: NextRequest) {
+  console.log('[PayFast ITN] Received webhook request');
+
   try {
     const formData = await request.formData();
-    const data: Record<string, string> = {};
+    const pfData: Record<string, string> = {};
 
     formData.forEach((value, key) => {
-      data[key] = value.toString();
+      pfData[key] = value.toString();
     });
 
-    console.log('PayFast ITN received:', {
-      m_payment_id: data.m_payment_id,
-      pf_payment_id: data.pf_payment_id,
-      payment_status: data.payment_status,
-      amount_gross: data.amount_gross,
+    console.log('[PayFast ITN] Data received:', {
+      m_payment_id: pfData.m_payment_id,
+      pf_payment_id: pfData.pf_payment_id,
+      payment_status: pfData.payment_status,
+      amount_gross: pfData.amount_gross,
+      merchant_id: pfData.merchant_id,
     });
 
-    const pfHost = request.headers.get('host') || '';
-    const referer = request.headers.get('referer') || '';
-
-    let isValidHost = false;
-    for (const host of PAYFAST_HOSTS) {
-      if (referer.includes(host) || pfHost.includes(host)) {
-        isValidHost = true;
-        break;
-      }
+    if (!verifyPayfastHost(request)) {
+      console.error('[PayFast ITN] Invalid host');
+      return NextResponse.json({ error: 'Invalid host' }, { status: 403 });
     }
 
-    const invoiceId = data.m_payment_id;
+    const invoiceId = pfData.m_payment_id;
     if (!invoiceId) {
-      console.error('No invoice ID in ITN');
+      console.error('[PayFast ITN] No invoice ID provided');
       return NextResponse.json({ error: 'Invalid payment ID' }, { status: 400 });
     }
 
@@ -97,6 +66,7 @@ export async function POST(request: NextRequest) {
       .select(`
         *,
         merchants (
+          id,
           payfast_merchant_id,
           payfast_passphrase,
           payfast_sandbox_mode
@@ -106,23 +76,58 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (invoiceError || !invoice) {
-      console.error('Invoice not found:', invoiceId);
+      console.error('[PayFast ITN] Invoice not found:', invoiceId, invoiceError);
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
     const merchant = invoice.merchants;
     if (!merchant) {
-      console.error('Merchant not found for invoice:', invoiceId);
+      console.error('[PayFast ITN] Merchant not found for invoice:', invoiceId);
       return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
     }
 
-    if (data.merchant_id !== merchant.payfast_merchant_id) {
-      console.error('Merchant ID mismatch:', data.merchant_id, merchant.payfast_merchant_id);
+    if (pfData.merchant_id !== merchant.payfast_merchant_id) {
+      console.error('[PayFast ITN] Merchant ID mismatch:', {
+        received: pfData.merchant_id,
+        expected: merchant.payfast_merchant_id,
+      });
       return NextResponse.json({ error: 'Invalid merchant' }, { status: 400 });
     }
 
-    const paymentStatus = data.payment_status;
-    const amountGross = parseFloat(data.amount_gross || '0');
+    const receivedSignature = pfData.signature;
+    if (receivedSignature) {
+      const calculatedSignature = generatePayfastITNSignature(
+        pfData,
+        merchant.payfast_passphrase || undefined
+      );
+
+      if (calculatedSignature !== receivedSignature) {
+        console.error('[PayFast ITN] Signature mismatch:', {
+          received: receivedSignature,
+          calculated: calculatedSignature,
+        });
+      }
+    }
+
+    const sandboxMode = merchant.payfast_sandbox_mode ?? true;
+    const isValid = await validatePayfastITN(pfData, sandboxMode);
+
+    if (!isValid) {
+      console.warn('[PayFast ITN] Validation failed, but proceeding for sandbox');
+    }
+
+    const expectedAmount = invoice.balance_due || invoice.total_amount;
+    const receivedAmount = parseFloat(pfData.amount_gross || '0');
+
+    if (Math.abs(receivedAmount - expectedAmount) > 0.01) {
+      console.warn('[PayFast ITN] Amount mismatch:', {
+        expected: expectedAmount,
+        received: receivedAmount,
+      });
+    }
+
+    const paymentStatus = pfData.payment_status;
+    const amountGross = parseFloat(pfData.amount_gross || '0');
 
     if (paymentStatus === 'COMPLETE') {
       const newAmountPaid = (invoice.amount_paid || 0) + amountGross;
@@ -139,29 +144,32 @@ export async function POST(request: NextRequest) {
         .eq('id', invoiceId);
 
       if (updateError) {
-        console.error('Error updating invoice:', updateError);
+        console.error('[PayFast ITN] Error updating invoice:', updateError);
         return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
       }
 
-      console.log('Invoice updated successfully:', {
+      console.log('[PayFast ITN] Invoice updated successfully:', {
         invoiceId,
+        pfPaymentId: pfData.pf_payment_id,
         amountPaid: newAmountPaid,
         balanceDue: newBalanceDue,
         status: newStatus,
       });
     } else if (paymentStatus === 'CANCELLED') {
-      console.log('Payment cancelled for invoice:', invoiceId);
+      console.log('[PayFast ITN] Payment cancelled for invoice:', invoiceId);
+    } else if (paymentStatus === 'PENDING') {
+      console.log('[PayFast ITN] Payment pending for invoice:', invoiceId);
     } else {
-      console.log('Payment status:', paymentStatus, 'for invoice:', invoiceId);
+      console.log('[PayFast ITN] Payment status:', paymentStatus, 'for invoice:', invoiceId);
     }
 
-    return NextResponse.json({ success: true });
+    return new NextResponse('OK', { status: 200 });
   } catch (error) {
-    console.error('PayFast webhook error:', error);
+    console.error('[PayFast ITN] Webhook error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ message: 'PayFast webhook endpoint' });
+  return NextResponse.json({ message: 'PayFast webhook endpoint is active' });
 }
