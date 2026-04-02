@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/rate-limit';
-import {
-  generatePayfastSignature,
-  PAYFAST_SANDBOX_URL,
-  PAYFAST_PRODUCTION_URL,
-  PAYFAST_SANDBOX_MERCHANT_ID,
-  PAYFAST_SANDBOX_MERCHANT_KEY,
-  PAYFAST_SANDBOX_PASSPHRASE,
-} from '@/lib/payfast';
 
 let supabaseAdmin: SupabaseClient | null = null;
 
@@ -29,24 +21,6 @@ function getSupabaseAdmin(): SupabaseClient {
     });
   }
   return supabaseAdmin;
-}
-
-function buildPayfastUrl(
-  baseUrl: string,
-  data: Record<string, string>,
-  passphrase?: string
-): string {
-  const signature = generatePayfastSignature(data, passphrase);
-
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(data)) {
-    if (value) {
-      params.append(key, value);
-    }
-  }
-  params.append('signature', signature);
-
-  return `${baseUrl}?${params.toString()}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -94,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, business_name, payfast_merchant_id, payfast_merchant_key, payfast_passphrase, payfast_sandbox_mode')
+      .select('id, business_name')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -114,13 +88,7 @@ export async function POST(request: NextRequest) {
         deposit_amount,
         balance_due,
         status,
-        merchant_id,
-        clients (
-          id,
-          name,
-          email_address,
-          phone_number
-        )
+        merchant_id
       `)
       .eq('id', invoice_id)
       .eq('merchant_id', merchant.id)
@@ -133,12 +101,6 @@ export async function POST(request: NextRequest) {
 
     console.log('[Invoice Send] Invoice found:', invoice.id, 'Status:', invoice.status);
 
-    const client = invoice.clients as unknown as { id: string; name: string; email_address?: string; phone_number: string };
-    if (!client) {
-      console.error('[Invoice Send] Client not found for invoice');
-      return NextResponse.json({ error: 'Client not found for invoice' }, { status: 404 });
-    }
-
     const isDeposit = payment_type === 'deposit';
     const paymentAmount = isDeposit ? invoice.deposit_amount : invoice.balance_due;
 
@@ -146,40 +108,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No amount due for this payment type' }, { status: 400 });
     }
 
-    const useSandbox = merchant.payfast_sandbox_mode ?? true;
-    const merchantId = useSandbox
-      ? PAYFAST_SANDBOX_MERCHANT_ID
-      : (merchant.payfast_merchant_id || PAYFAST_SANDBOX_MERCHANT_ID);
-    const merchantKey = useSandbox
-      ? PAYFAST_SANDBOX_MERCHANT_KEY
-      : (merchant.payfast_merchant_key || PAYFAST_SANDBOX_MERCHANT_KEY);
-    const passphrase = useSandbox
-      ? PAYFAST_SANDBOX_PASSPHRASE
-      : (merchant.payfast_passphrase || undefined);
-    const payfastBaseUrl = useSandbox ? PAYFAST_SANDBOX_URL : PAYFAST_PRODUCTION_URL;
+    const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || '';
+    const paymentUrl = `${appBaseUrl}/pay/${invoice.id}?type=${payment_type}`;
 
-    const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get('origin') || 'https://yourdomain.com';
-
-    const paymentData: Record<string, string> = {
-      merchant_id: merchantId,
-      merchant_key: merchantKey,
-      return_url: `${appBaseUrl}/payment/success?invoice_id=${invoice.id}`,
-      cancel_url: `${appBaseUrl}/payment/cancelled?invoice_id=${invoice.id}`,
-      notify_url: `${appBaseUrl}/api/webhooks/payfast`,
-      name_first: client.name?.split(' ')[0] || 'Customer',
-      m_payment_id: invoice.id,
-      amount: paymentAmount.toFixed(2),
-      item_name: `Invoice ${invoice.invoice_number || 'Payment'}`,
-      item_description: `Payment for ${merchant.business_name || 'services'}`,
-    };
-
-    if (client.email_address) {
-      paymentData.email_address = client.email_address;
-    }
-
-    const paymentUrl = buildPayfastUrl(payfastBaseUrl, paymentData, passphrase);
-
-    console.log('[Invoice Send] PayFast URL generated');
+    console.log('[Invoice Send] Checkout URL generated:', paymentUrl);
 
     const newStatus = isDeposit ? 'Pending Deposit' : 'Pending Final';
     const { error: updateError } = await supabase

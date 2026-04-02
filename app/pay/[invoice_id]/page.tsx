@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Loader as Loader2, CircleAlert as AlertCircle, CreditCard, Shield } from 'lucide-react';
 import {
@@ -16,6 +16,7 @@ import {
 
 interface InvoiceData {
   id: string;
+  invoice_number: string | null;
   total_amount: number;
   deposit_amount: number;
   amount_paid: number;
@@ -36,7 +37,9 @@ interface InvoiceData {
 
 export default function PaymentPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const invoiceId = params.invoice_id as string;
+  const paymentType = searchParams.get('type') || 'final';
   const formRef = useRef<HTMLFormElement>(null);
 
   const [loading, setLoading] = useState(true);
@@ -54,6 +57,7 @@ export default function PaymentPage() {
           .from('quotes_invoices')
           .select(`
             id,
+            invoice_number,
             total_amount,
             deposit_amount,
             amount_paid,
@@ -113,13 +117,20 @@ export default function PaymentPage() {
       return;
     }
 
-    const balanceDue = invoice.balance_due > 0 ? invoice.balance_due : invoice.total_amount;
-    if (balanceDue <= 0) {
+    const isDeposit = paymentType === 'deposit';
+    const amountToPay = isDeposit && invoice.deposit_amount > 0 && invoice.amount_paid === 0
+      ? invoice.deposit_amount
+      : invoice.balance_due;
+
+    if (amountToPay <= 0) {
       setError('This invoice has already been paid.');
       return;
     }
 
     const baseUrl = window.location.origin;
+    const itemName = invoice.invoice_number
+      ? `Invoice ${invoice.invoice_number}${isDeposit ? ' - Deposit' : ''}`
+      : `Invoice Payment${isDeposit ? ' - Deposit' : ''}`;
 
     const data: Record<string, string> = {
       merchant_id: merchantId,
@@ -129,8 +140,8 @@ export default function PaymentPage() {
       notify_url: `${baseUrl}/api/webhooks/payfast`,
       name_first: invoice.clients?.name?.split(' ')[0] || 'Customer',
       m_payment_id: invoiceId,
-      amount: balanceDue.toFixed(2),
-      item_name: `Invoice Payment`,
+      amount: amountToPay.toFixed(2),
+      item_name: itemName,
       item_description: `Payment for ${merchant?.business_name || 'services'}`,
     };
 
@@ -218,8 +229,8 @@ export default function PaymentPage() {
   }
 
   if (showDetails && invoice) {
-    const amountDue = invoice.balance_due > 0 ? invoice.balance_due : invoice.total_amount;
-    const isDeposit = invoice.deposit_amount > 0 && invoice.amount_paid === 0;
+    const isDeposit = paymentType === 'deposit' && invoice.deposit_amount > 0 && invoice.amount_paid === 0;
+    const amountDue = isDeposit ? invoice.deposit_amount : invoice.balance_due;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
@@ -228,7 +239,12 @@ export default function PaymentPage() {
             <h1 className="text-white text-xl font-semibold mb-1">
               {invoice.merchants?.business_name || 'Invoice Payment'}
             </h1>
-            <p className="text-emerald-100 text-sm">Secure Payment</p>
+            {invoice.invoice_number && (
+              <p className="text-emerald-100 text-sm">Invoice #{invoice.invoice_number}</p>
+            )}
+            {!invoice.invoice_number && (
+              <p className="text-emerald-100 text-sm">Secure Payment</p>
+            )}
           </div>
 
           <div className="p-6 space-y-6">
@@ -263,7 +279,9 @@ export default function PaymentPage() {
                 </span>
               </div>
               <div className="border-t border-slate-200 pt-3 flex justify-between">
-                <span className="font-medium text-slate-900">Balance Due</span>
+                <span className="font-medium text-slate-900">
+                  {isDeposit ? 'Deposit Due' : 'Balance Due'}
+                </span>
                 <span className="font-bold text-emerald-600">
                   {formatCurrency(amountDue)}
                 </span>
@@ -275,7 +293,7 @@ export default function PaymentPage() {
               className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
             >
               <CreditCard className="w-5 h-5" />
-              Pay Now with PayFast
+              Pay {isDeposit ? 'Deposit' : 'Now'} with PayFast
             </button>
 
             <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
